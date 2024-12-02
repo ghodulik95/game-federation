@@ -1,9 +1,10 @@
 import FederationService from './FederationService.js';
 
 export default class MockFederationService extends FederationService {
-    constructor(webSocketClient) {
-        super(webSocketClient);
+    constructor() {
+        super();
     }
+    
     subscribeToFederatedStream() {
         return true
     }
