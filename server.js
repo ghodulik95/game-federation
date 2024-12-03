@@ -1,5 +1,5 @@
 import ProjectExecutor from './ProjectExecutor.js';
-import MockFederationService from './MockFederationService.js';
+import MastodonFederationService from './MastodonFederationService.js';
 import YukonServerWebSocketClient from './YukonServerWebSocketClient.js';
 import YukonServerEventListener from './YukonServerEventListener.js';
 
@@ -13,7 +13,7 @@ const wsClient = new YukonServerWebSocketClient(`ws://localhost:${yukonServerPor
 const eventListener = new YukonServerEventListener(yukonListenerPort);
 
 // Initialize the concrete federation service
-const federationService = new MockFederationService(wsClient);
+const federationService = new MastodonFederationService();
 
 // Execute the project
 const project = new ProjectExecutor(wsClient, eventListener, federationService);

@@ -12,7 +12,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "express": "^4.21.1",
+    "he": "^1.2.0",
+    "masto": "^6.10.1",
+    "mysql2": "^3.9.2",
+    "random-words": "^1.1.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
