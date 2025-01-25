@@ -8,12 +8,12 @@ import WebSocket from 'ws'
 import htmlEntities from 'he'; // Import a library for decoding HTML entities
 
 export default class MastodonFederationService extends FederationService {
-    constructor(serverInstance = 'social.collectivemoo.net', serverURL = '192.168.40.40:8080') {
+    constructor(serverInstance = 'social.collectivemoo.net') {
         super();
         this.serverInstance = serverInstance;
-        this.serverURL = serverURL;
         this.mastodonPostingClient = null;
         this.dbConnection = null;
+        this.ws = null
     }
 
     async onNewFollow(username, serverInstance) {
@@ -50,9 +50,9 @@ export default class MastodonFederationService extends FederationService {
         try {
             this.dbConnection = await mysql.createConnection({
                 host: 'localhost',
-                user: 'yukon',
-                password: 'my_password',
-                database: 'yukon',
+                user: config.yukonUserDbUsername,
+                password: config.yukonUserDbPassword,
+                database: config.yukonDatabaseName,
             });
 
             this.mastodonPostingClient = createRestAPIClient({
@@ -62,15 +62,15 @@ export default class MastodonFederationService extends FederationService {
         } catch (error) {
             console.error('Error initializing MastodonFederationService:', error);
         }
-
-        super.start();
+        
+        this.subscribeToFederatedStream();
     }
     
     removeHtmlTags(input) {
         return input.replace(/<\/?[^>]+(>|$)/g, '');
     }
 
-    async subscribeToFederatedStream() {
+    subscribeToFederatedStream() {
         
         // Mastodon API credentials
         const ACCESS_TOKEN = config.yukonMastodonAccountSecretKey; // Replace with your Mastodon access token
@@ -93,17 +93,17 @@ export default class MastodonFederationService extends FederationService {
                 }
 
                 // Establish the WebSocket connection
-                const ws = new WebSocket(`${INSTANCE_URL}/api/v1/streaming?stream=user`, {
+                this.ws = new WebSocket(`${INSTANCE_URL}/api/v1/streaming?stream=user`, {
                     headers: {
                     Authorization: `Bearer ${ACCESS_TOKEN}`
                 }
                 });
 
-                ws.on('open', () => {
+                this.ws.on('open', () => {
                     console.log('WebSocket connection established to user stream');
                 });
 
-                ws.on('message', (data) => {
+                this.ws.on('message', (data) => {
                     const parsedData = JSON.parse(data);
                     
                     if (parsedData.event === 'update') {
@@ -136,7 +136,7 @@ export default class MastodonFederationService extends FederationService {
                             if (yukonMessage.startsWith('{')) {
                                 // Step 4: Parse the JSON string into a JavaScript object
                                 const originalMessage = JSON.parse(yukonMessage);
-                                this.onFederatedMessageReceived(originalMessage)
+                                this.handleFederatedGameEvent(originalMessage)
                             }
                         } catch (error) {
                             console.log("Error processing update message:", error)
@@ -154,17 +154,40 @@ export default class MastodonFederationService extends FederationService {
                     }
                 });
 
-                ws.on('error', (err) => {
+                this.ws.on('error', (err) => {
                     console.error('WebSocket error:', err);
                 });
 
-                ws.on('close', () => {
+                this.ws.on('close', () => {
                     console.log('WebSocket connection closed');
                 });
             } catch (error) {
                 console.error('Error:', error);
             }
         })();
+    }
+    
+    async close() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.close(1000, 'Client is closing the connection'); // 1000 is the normal closure code
+            console.log('WebSocket connection is closing...');
+        } else {
+            console.log('WebSocket is not open or already closed.');
+        }
+        
+        if (this.dbConnection) {
+            try {
+                await this.dbConnection.end();
+                console.log('Database connection closed.');
+            } catch (error) {
+                console.error('Error closing database connection:', error);
+            }
+        } else {
+            console.log('No database connection to close.');
+        }
+        this.mastodonPostingClient = null;
+        this.dbConnection = null;
+        this.ws = null
     }
     
     makeHumanReadableTitle(message) {
