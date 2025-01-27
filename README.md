@@ -47,7 +47,7 @@ Using the game as a front-end for social media could open further opportunities:
 By combining gaming and federated social media, this framework fosters a unique, decentralized, and interactive online experience.
 
 ## Code details
-Each GameFederationRelay should be associated with exactly one real game server and one or two federated messaging accounts (using Mastodon accounts here). Users with an account in said actual game server use the game server as they normally would, but the server sends each user action to the federated messaging account, which broadcasts the message to its followers/listeners. When the federated account (e.g. Mastodon account) receives a message from a following account (which must be another game server account), the 
+Abstracted into FederationService, GameServerEventEmitter, GameServerEventListener. FederationService both listens for Federated messages from other federated game servers (e.g. listening for toots from following server accounts for an associated Mastodon account), and sends federated messages (e.g. by posting a toot for an associated Mastodon account).  Not included in this repository is any connecting game; we assume GameServer exists elsewhere. GameServerEventListener listens for messages from GameServer and provides a callback for FederationService to hook into. GameServerEventEmitter can emit GameServer events to GameServer, and provides a callback for FederationService to hook into. 
 
 ### Requirements
 Mastodon account
@@ -55,5 +55,4 @@ Mastodon account secret key
 (Highly recommended) Server admin approval to do this - might get spammy
 Running local instances of yukon and yukon-server forks
 
-
-The code assumes three interfaces. The GameServerListener listens to an actual game server instance for what users are doing. The FederationService then federates what the GameServerListener picks up, so that other federated servers can consume the user actions. The FederatedMessageListener listens for federated messages from other servers, and passes them to the game 
+More documentation coming soon...
