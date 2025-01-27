@@ -8,12 +8,13 @@ import WebSocket from 'ws'
 import htmlEntities from 'he'; // Import a library for decoding HTML entities
 
 export default class MastodonFederationService extends FederationService {
-    constructor(serverInstance = 'social.collectivemoo.net', serverURL = '192.168.40.40:8080') {
+    constructor(serverInstance = 'social.collectivemoo.net') {
         super();
         this.serverInstance = serverInstance;
-        this.serverURL = serverURL;
         this.mastodonPostingClient = null;
         this.dbConnection = null;
+        this.ws = null
+        this.mostRecentMessageIdByRoom = {};
     }
 
     async onNewFollow(username, serverInstance) {
@@ -50,31 +51,36 @@ export default class MastodonFederationService extends FederationService {
         try {
             this.dbConnection = await mysql.createConnection({
                 host: 'localhost',
-                user: 'yukon',
-                password: 'my_password',
-                database: 'yukon',
+                user: config.yukonUserDbUsername,
+                password: config.yukonUserDbPassword,
+                database: config.yukonDatabaseName,
             });
 
             this.mastodonPostingClient = createRestAPIClient({
                 url: `https://${this.serverInstance}/api/v1`,
-                accessToken: config.yukonMastodonAccountSecretKey,
+                accessToken: config.serverFacingMastodonAccountSecretKey,
+            });
+            
+            this.humanPostingClient = createRestAPIClient({
+                url: `https://${this.serverInstance}/api/v1`,
+                accessToken: config.humanFacingMastodonAccountSecretKey,
             });
         } catch (error) {
             console.error('Error initializing MastodonFederationService:', error);
         }
-
-        super.start();
+        
+        this.subscribeToFederatedStream();
     }
     
     removeHtmlTags(input) {
         return input.replace(/<\/?[^>]+(>|$)/g, '');
     }
 
-    async subscribeToFederatedStream() {
+    subscribeToFederatedStream() {
         
         // Mastodon API credentials
-        const ACCESS_TOKEN = config.yukonMastodonAccountSecretKey; // Replace with your Mastodon access token
-        const INSTANCE_URL = 'https://social.collectivemoo.net'; // Replace with your Mastodon instance URL
+        const ACCESS_TOKEN = config.serverFacingMastodonAccountSecretKey; // Replace with your Mastodon access token
+        const INSTANCE_URL = 'https://' + config.mastodonUrl; // Replace with your Mastodon instance URL
 
 
 
@@ -93,17 +99,17 @@ export default class MastodonFederationService extends FederationService {
                 }
 
                 // Establish the WebSocket connection
-                const ws = new WebSocket(`${INSTANCE_URL}/api/v1/streaming?stream=user`, {
+                this.ws = new WebSocket(`${INSTANCE_URL}/api/v1/streaming?stream=user`, {
                     headers: {
                     Authorization: `Bearer ${ACCESS_TOKEN}`
                 }
                 });
 
-                ws.on('open', () => {
+                this.ws.on('open', () => {
                     console.log('WebSocket connection established to user stream');
                 });
 
-                ws.on('message', (data) => {
+                this.ws.on('message', (data) => {
                     const parsedData = JSON.parse(data);
                     
                     if (parsedData.event === 'update') {
@@ -114,29 +120,13 @@ export default class MastodonFederationService extends FederationService {
                             
                             let yukonMessage = processedMessage;
                             
-                            if (processedMessage.startsWith("Human Readable title")) {
-                                // Split the string by lines
-                                const lines = processedMessage.split(';;;');
-                                if (lines.length == 1) {
-                                    console.error("Got a message with a human readable part, but no ;;; delimiter")
-                                    return
-                                }
-                                if (lines.length > 2) {
-                                    console.warn('Message has more parts than expected')
-                                }
-                                
-                                // Extract the first line (the title)
-                                const hr = lines[0];
-                                // Overwrite yukonMessage with the rest of the message (excluding the first line)
-                                yukonMessage = lines[1];
-                            }
                             yukonMessage = this.removeHtmlTags(yukonMessage)
                             yukonMessage = htmlEntities.decode(yukonMessage)
                             
                             if (yukonMessage.startsWith('{')) {
                                 // Step 4: Parse the JSON string into a JavaScript object
                                 const originalMessage = JSON.parse(yukonMessage);
-                                this.onFederatedMessageReceived(originalMessage)
+                                this.handleFederatedGameEvent(originalMessage)
                             }
                         } catch (error) {
                             console.log("Error processing update message:", error)
@@ -154,17 +144,40 @@ export default class MastodonFederationService extends FederationService {
                     }
                 });
 
-                ws.on('error', (err) => {
-                    console.error('WebSocket error:', err);
+                this.ws.on('error', (err) => {
+                    console.error('WebSocket error1:', err);
                 });
 
-                ws.on('close', () => {
+                this.ws.on('close', () => {
                     console.log('WebSocket connection closed');
                 });
             } catch (error) {
                 console.error('Error:', error);
             }
         })();
+    }
+    
+    async close() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.close(1000, 'Client is closing the connection'); // 1000 is the normal closure code
+            console.log('WebSocket connection is closing...');
+        } else {
+            console.log('WebSocket is not open or already closed.');
+        }
+        
+        if (this.dbConnection) {
+            try {
+                await this.dbConnection.end();
+                console.log('Database connection closed.');
+            } catch (error) {
+                console.error('Error closing database connection:', error);
+            }
+        } else {
+            console.log('No database connection to close.');
+        }
+        this.mastodonPostingClient = null;
+        this.dbConnection = null;
+        this.ws = null
     }
     
     makeHumanReadableTitle(message) {
@@ -195,11 +208,33 @@ export default class MastodonFederationService extends FederationService {
 
     async federateMessage(message) {
         try {
+            // Determine the ID to reply to
+            let inReplyTo = undefined;
+            const roomId = message.user.roomId; // Get the current room ID
+            const currentTime = Date.now(); // Current time in milliseconds
+            const recentMessage = this.mostRecentMessageIdByRoom[roomId]; // Get the most recent message for the room
+            if (recentMessage) {
+                const [messageId, messageTimestamp] = recentMessage; // Destructure the message ID and timestamp
+
+                // Check if the most recent message is within the last 5 minutes
+                const isRecent = currentTime - messageTimestamp <= 5 * 60 * 1000;
+
+                if (isRecent) {
+                    inReplyTo = messageId; // Set the reply ID to the most recent message
+                }
+            }
+            
             const hr = this.makeHumanReadableTitle(message)
             await this.mastodonPostingClient.v1.statuses.create({
-                status: `Human Readable title: ${hr};;;` + JSON.stringify(message),
+                status: JSON.stringify(message),
                 visibility: 'unlisted'
             });
+            const humanToot = await this.humanPostingClient.v1.statuses.create({
+                status: hr,
+                visibility: 'public',
+                in_reply_to_id: inReplyTo
+            });
+            this.mostRecentMessageIdByRoom[roomId] = [humanToot.id, currentTime]
         } catch (error) {
             console.error('Error federating message:', error);
         }

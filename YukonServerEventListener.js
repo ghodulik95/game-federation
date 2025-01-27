@@ -1,31 +1,37 @@
 import express from 'express';
+import GameServerEventListener from './GameServerEventListener.js';
 
-export default class YukonServerEventListener {
-    constructor(port, federationService) {
+export default class YukonServerEventListener extends GameServerEventListener {
+    constructor(port) {
+        super(port)
+        this.server = null;
+        this.app = null;
+        
+    }
+
+    start() {
         this.app = express();
-        this.port = port;
-        this.federationService = null;
 
         this.app.use(express.json());
 
         this.app.post('/', (req, res) => {
-            if (!this.federationService) {
-                console.error("Federation service not set up. Cannot federate event.")
-                return
-            }
-            this.federationService.handleReceiveMessageFromYukonServer(req.body);
+            this.onReceiveMessage(req.body);
 
             res.json({ message: 'Data received', data: req.body });
         });
-    }
-    
-    setFederationService(federationService) {
-        this.federationService = federationService
-    }
-
-    start() {
-        this.app.listen(this.port, () => {
+        this.server = this.app.listen(this.port, () => {
             console.log(`Server is running on http://localhost:${this.port}`);
         });
+    }
+
+    close() {
+        if (this.server) {
+            this.server.close(() => {
+                console.log(`Server on http://localhost:${this.port} has been closed`);
+            });
+            this.server = null;
+        } else {
+            console.log('No server is currently running to close.');
+        }
     }
 }

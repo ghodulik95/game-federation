@@ -10,35 +10,26 @@ export default class FederationService {
         if (new.target === FederationService) {
             throw new Error("Cannot instantiate abstract class FederationService directly.");
         }
-        this.federatedMessageListener = null
-        this.yukonServerListener = null
+        this.fedeeratedGameEventCallback = null
     }
     
-    setFederatedMessageListener(wsClient) {
-        this.federatedMessageListener = wsClient
+    setOnFedEventReceived(cb) {
+        this.federatedGameEventCallback = cb;
     }
     
-    setYukonServerListener(yukonServerHttpListener) {
-        this.yukonServerListener = yukonServerHttpListener
-        this.yukonServerListener.setFederationService(this)
+    federateMessageCallback() {
+        return (msg) => this.federateMessage(msg);
     }
     
-    start() {
-        this.federatedMessageListener.connect()
-        this.yukonServerListener.start()
-        this.subscribeToFederatedStream()
+    async start() {
+    }
+    
+    async close() {
+        
     }
 
-    handleReceiveMessageFromYukonServer(message) {
-        this.federateMessage(message);
-    }
-
-    onFederatedMessageReceived(message) {
-        this.federatedMessageListener.sendMessageToYukonServer(message);
-    }
-    
-    subscribeToFederatedStream() {
-        throw new Error("Method 'subscribeToFederatedStream' must be implemented")
+    handleFederatedGameEvent(message) {
+        this.federatedGameEventCallback(message);
     }
 
     federateMessage(message) {
